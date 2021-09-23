@@ -2,6 +2,7 @@ package main
 
 import (
 	"image/color"
+	"strconv"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -9,7 +10,15 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
-const TileSize = 16
+const Title = "Wireworld - "
+
+var TileSize = 16.0
+
+//Cell Colors
+var WireColor = color.RGBA{R: 0, G: 0, B: 100, A: 255}
+var HeadColor = color.RGBA{R: 100, G: 0, B: 0, A: 255}
+var TailColor = color.RGBA{R: 0, G: 100, B: 0, A: 255}
+var DeadColor = color.RGBA{R: 100, G: 100, B: 100, A: 255}
 
 type CellType int
 
@@ -21,6 +30,7 @@ const (
 )
 
 type Game struct {
+	title               string
 	world               [][]CellType
 	runningWorld        [][]CellType
 	ScreenWidth         int
@@ -30,13 +40,14 @@ type Game struct {
 	Running             bool
 	Tick                int
 	SecondDelay         time.Duration
+	StepMode            bool
 	LastUpdated         time.Time
 	ScrollX             int
 	ScrollY             int
 }
 
 func NewGame(width int, height int, screenWidth int, screenHeight int) (*Game, error) {
-	g := &Game{ScreenWidth: screenWidth, ScreenHeight: screenHeight, NumberOfTilesWidth: width, NumberOfTilesHeight: height, SecondDelay: time.Second / 2, LastUpdated: time.Now()}
+	g := &Game{title: Title + "Editing", ScreenWidth: screenWidth, ScreenHeight: screenHeight, NumberOfTilesWidth: width, NumberOfTilesHeight: height, SecondDelay: time.Second / 2, LastUpdated: time.Now()}
 
 	g.world = CreateWorldArray(width, height)
 	return g, nil
@@ -50,41 +61,50 @@ func (g *Game) Run() error {
 func (g *Game) Update() error {
 	//Adjust Tile Logic
 	cX, cY := getTileUnderMouse()
-	if cX < g.NumberOfTilesWidth && cY < g.NumberOfTilesHeight {
+	screenCellX := cX + g.ScrollX
+	screenCellY := cY + g.ScrollY
+	if screenCellX < g.NumberOfTilesWidth && screenCellY < g.NumberOfTilesHeight {
 		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			switch g.world[cX][cY] {
-			case Dead:
-				g.world[cX][cY] = Wire
-			case Wire:
-				g.world[cX][cY] = Head
-			case Head:
-				g.world[cX][cY] = Tail
-			case Tail:
-				g.world[cX][cY] = Wire
+			if g.Running {
+				g.SetRunning(false)
 			}
 
+			switch g.world[screenCellX][screenCellY] {
+			case Dead:
+				g.world[screenCellX][screenCellY] = Wire
+			case Wire:
+				g.world[screenCellX][screenCellY] = Head
+			case Head:
+				g.world[screenCellX][screenCellY] = Tail
+			case Tail:
+				g.world[screenCellX][screenCellY] = Wire
+			}
+		} else if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) { //Allow for drag adding of wires.
+			if g.Running {
+				g.SetRunning(false)
+			}
+
+			if g.world[screenCellX][screenCellY] == Dead {
+				g.world[screenCellX][screenCellY] = Wire
+			}
 		}
 
+		//Kill cell
 		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
-			g.Running = false
+			if g.Running {
+				g.SetRunning(false)
+			}
 
-			g.world[cX][cY] = Dead
+			g.world[screenCellX][screenCellY] = Dead
 		}
 	}
 
+	//Pause/Run simulation
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		g.Running = !g.Running
-		if g.Running {
-			temp := g.world
-			g.runningWorld = temp
-			g.Tick = 0
-			ebiten.SetWindowTitle("Running")
-		} else {
-			ebiten.SetWindowTitle("Editing")
-		}
-
+		g.SetRunning(!g.Running)
 	}
 
+	//Speed settings
 	if inpututil.IsKeyJustPressed(ebiten.Key1) {
 		g.SecondDelay = time.Millisecond
 	}
@@ -101,19 +121,39 @@ func (g *Game) Update() error {
 		g.SecondDelay = time.Second * 2
 	}
 
-	if inpututil.IsKeyJustPressed(ebiten.KeyW) {
+	//Tile size settings
+	if inpututil.IsKeyJustPressed(ebiten.KeyMinus) {
+		if TileSize > 8 {
+			TileSize = TileSize / 2
+		}
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyEqual) {
+		if TileSize < 62 {
+			TileSize = TileSize * 2
+		}
+	}
+
+	// Move view controls
+	if ebiten.IsKeyPressed(ebiten.KeyW) {
 		if g.ScrollY > 0 {
 			g.ScrollY--
 		}
+	}
 
+	if ebiten.IsKeyPressed(ebiten.KeyS) {
 		if g.ScrollY < g.NumberOfTilesHeight {
 			g.ScrollY++
 		}
+	}
 
+	if ebiten.IsKeyPressed(ebiten.KeyA) {
 		if g.ScrollX > 0 {
 			g.ScrollX--
 		}
+	}
 
+	if ebiten.IsKeyPressed(ebiten.KeyD) {
 		if g.ScrollX < g.NumberOfTilesWidth {
 			g.ScrollX++
 		}
@@ -125,77 +165,66 @@ func (g *Game) Update() error {
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	if !g.Running {
-		for cellX := 0; cellX < g.NumberOfTilesWidth; cellX++ {
-			for cellY := 0; cellY < g.NumberOfTilesHeight; cellY++ {
-				x := float64(cellX) * TileSize
-				y := float64(cellY) * TileSize
+		cX, cY := getTileUnderMouse()
 
-				c := color.RGBA{R: 100, G: 100, B: 100, A: 255}
-
-				switch g.world[cellX][cellY] {
-				case Wire:
-					c = color.RGBA{R: 0, G: 0, B: 100, A: 255}
-				case Head:
-					c = color.RGBA{R: 100, G: 0, B: 0, A: 255}
-				case Tail:
-					c = color.RGBA{R: 0, G: 100, B: 0, A: 255}
-				}
-
-				cX, cY := getTileUnderMouse()
-				if cX == cellX && cY == cellY {
-					c.R += 100
-				}
-				ebitenutil.DrawRect(screen, x, y, TileSize-1, TileSize-1, c)
-			}
-		}
+		ebiten.SetWindowTitle(g.title + "X: " + strconv.Itoa(g.ScrollX+cX) + " Y: " + strconv.Itoa(g.ScrollY+cY))
+		g.DrawWorldArray(g.world, screen)
 	} else {
-		for cellX := 0; cellX < g.NumberOfTilesWidth; cellX++ {
-			for cellY := 0; cellY < g.NumberOfTilesHeight; cellY++ {
-				x := float64(cellX) * TileSize
-				y := float64(cellY) * TileSize
-
-				c := color.RGBA{R: 100, G: 100, B: 100, A: 255}
-
-				switch g.runningWorld[cellX][cellY] {
-				case Wire:
-					c = color.RGBA{R: 0, G: 0, B: 100, A: 255}
-				case Head:
-					c = color.RGBA{R: 100, G: 0, B: 0, A: 255}
-				case Tail:
-					c = color.RGBA{R: 0, G: 100, B: 0, A: 255}
-				}
-
-				cX, cY := getTileUnderMouse()
-				if cX == cellX && cY == cellY {
-					c.R += 100
-				}
-				ebitenutil.DrawRect(screen, x, y, TileSize-1, TileSize-1, c)
-			}
-		}
+		ebiten.SetWindowTitle(g.title + " : " + strconv.Itoa(g.Tick))
+		g.DrawWorldArray(g.runningWorld, screen)
 	}
 
+}
+
+func (g *Game) SetRunning(status bool) {
+	g.Running = status
+	if status {
+		temp := g.world
+		g.runningWorld = temp
+		g.Tick = 0
+		g.title = Title + "Running"
+	} else {
+		g.title = Title + "Editing"
+	}
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return g.ScreenWidth, g.ScreenHeight
 }
 
-func getTileUnderMouse() (int, int) {
-	cX, cY := ebiten.CursorPosition()
-	return cX / TileSize, cY / TileSize
-}
+func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
+	for cellX := 0; cellX < g.NumberOfTilesWidth; cellX++ {
+		for cellY := 0; cellY < g.NumberOfTilesHeight; cellY++ {
+			x := float64(cellX) * TileSize
+			y := float64(cellY) * TileSize
 
-func CreateWorldArray(width int, height int) [][]CellType {
-	data := make([][]CellType, width)
-	for x := 0; x < width; x++ {
-		col := []CellType{}
-		for y := 0; y < height; y++ {
-			col = append(col, Dead)
+			c := color.RGBA{R: 0, G: 0, B: 0, A: 255}
+
+			screenCellX := g.ScrollX + cellX
+			screenCellY := g.ScrollY + cellY
+
+			if screenCellX >= 0 && screenCellX < g.NumberOfTilesWidth && screenCellY >= 0 && screenCellY < g.NumberOfTilesHeight {
+				switch world[screenCellX][screenCellY] {
+				case Wire:
+					c = WireColor
+				case Head:
+					c = HeadColor
+				case Tail:
+					c = TailColor
+				case Dead:
+					c = DeadColor
+				}
+
+				//Highlight cell - note that it's using cellX and cellY not the screen coords
+				cX, cY := getTileUnderMouse()
+				if cX == cellX && cY == cellY {
+					c.R += 100
+				}
+			}
+
+			ebitenutil.DrawRect(screen, x, y, TileSize-1, TileSize-1, c)
 		}
-		data[x] = append(data[x], col...)
 	}
-
-	return data
 }
 
 func (g *Game) UpdateSimulation() {
@@ -247,4 +276,23 @@ func (g *Game) UpdateSimulation() {
 		g.Tick++
 		g.LastUpdated = time.Now()
 	}
+}
+
+func getTileUnderMouse() (int, int) {
+	cX, cY := ebiten.CursorPosition()
+	temp := int(TileSize)
+	return cX / temp, cY / temp
+}
+
+func CreateWorldArray(width int, height int) [][]CellType {
+	data := make([][]CellType, width)
+	for x := 0; x < width; x++ {
+		col := []CellType{}
+		for y := 0; y < height; y++ {
+			col = append(col, Dead)
+		}
+		data[x] = append(data[x], col...)
+	}
+
+	return data
 }
