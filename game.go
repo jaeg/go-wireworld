@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"image/color"
+	"os"
 	"strconv"
 	"time"
 
@@ -11,6 +13,11 @@ import (
 )
 
 const Title = "Wireworld - "
+
+const ScreenWidth = 640
+const ScreenHeight = 480
+
+const GUIWidth = 0
 
 var TileSize = 16.0
 
@@ -33,8 +40,6 @@ type Game struct {
 	title               string
 	world               [][]CellType
 	runningWorld        [][]CellType
-	ScreenWidth         int
-	ScreenHeight        int
 	NumberOfTilesWidth  int
 	NumberOfTilesHeight int
 	Running             bool
@@ -44,12 +49,16 @@ type Game struct {
 	LastUpdated         time.Time
 	ScrollX             int
 	ScrollY             int
+	SimulationWidth     int
+	SimulationHeight    int
 }
 
-func NewGame(width int, height int, screenWidth int, screenHeight int) (*Game, error) {
-	g := &Game{title: Title + "Editing", ScreenWidth: screenWidth, ScreenHeight: screenHeight, NumberOfTilesWidth: width, NumberOfTilesHeight: height, SecondDelay: time.Second / 2, LastUpdated: time.Now()}
+func NewGame(width int, height int) (*Game, error) {
+	g := &Game{title: Title + "Editing", NumberOfTilesWidth: width, NumberOfTilesHeight: height, SecondDelay: time.Second / 2, LastUpdated: time.Now()}
 
 	g.world = CreateWorldArray(width, height)
+	ebiten.SetWindowResizable(true)
+	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
 	return g, nil
 }
 
@@ -159,6 +168,14 @@ func (g *Game) Update() error {
 		}
 	}
 
+	if ebiten.IsKeyPressed(ebiten.KeyE) {
+		g.SaveWorld("save.csv")
+	}
+
+	if ebiten.IsKeyPressed(ebiten.KeyL) {
+		g.LoadWorld("save.csv")
+	}
+
 	g.UpdateSimulation()
 	return nil
 }
@@ -167,10 +184,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if !g.Running {
 		cX, cY := getTileUnderMouse()
 
-		ebiten.SetWindowTitle(g.title + "X: " + strconv.Itoa(g.ScrollX+cX) + " Y: " + strconv.Itoa(g.ScrollY+cY))
+		ebiten.SetWindowTitle(g.title + " FPS: " + strconv.Itoa(int(ebiten.CurrentFPS())) + " X: " + strconv.Itoa(g.ScrollX+cX) + " Y: " + strconv.Itoa(g.ScrollY+cY))
 		g.DrawWorldArray(g.world, screen)
 	} else {
-		ebiten.SetWindowTitle(g.title + " : " + strconv.Itoa(g.Tick))
+		ebiten.SetWindowTitle(g.title + " FPS: " + strconv.Itoa(int(ebiten.CurrentFPS())) + " : " + strconv.Itoa(g.Tick))
 		g.DrawWorldArray(g.runningWorld, screen)
 	}
 
@@ -189,22 +206,27 @@ func (g *Game) SetRunning(status bool) {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	return g.ScreenWidth, g.ScreenHeight
+	g.SimulationWidth = outsideWidth - GUIWidth
+	g.SimulationHeight = outsideHeight
+	return outsideWidth, outsideHeight
 }
 
 func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
-	for cellX := 0; cellX < g.NumberOfTilesWidth; cellX++ {
-		for cellY := 0; cellY < g.NumberOfTilesHeight; cellY++ {
-			x := float64(cellX) * TileSize
-			y := float64(cellY) * TileSize
+	width := float64(g.SimulationWidth) / TileSize
+	height := float64(g.SimulationHeight) / TileSize
+
+	for x := 0.0; x < width; x++ {
+		for y := 0.0; y < height; y++ {
+			screenX := x * TileSize
+			screenY := y * TileSize
+
+			cellX := g.ScrollX + int(x)
+			cellY := g.ScrollY + int(y)
 
 			c := color.RGBA{R: 0, G: 0, B: 0, A: 255}
 
-			screenCellX := g.ScrollX + cellX
-			screenCellY := g.ScrollY + cellY
-
-			if screenCellX >= 0 && screenCellX < g.NumberOfTilesWidth && screenCellY >= 0 && screenCellY < g.NumberOfTilesHeight {
-				switch world[screenCellX][screenCellY] {
+			if cellX >= 0 && cellX < g.NumberOfTilesWidth && cellY >= 0 && cellY < g.NumberOfTilesHeight {
+				switch world[cellX][cellY] {
 				case Wire:
 					c = WireColor
 				case Head:
@@ -222,7 +244,7 @@ func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
 				}
 			}
 
-			ebitenutil.DrawRect(screen, x, y, TileSize-1, TileSize-1, c)
+			ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, c)
 		}
 	}
 }
@@ -295,4 +317,53 @@ func CreateWorldArray(width int, height int) [][]CellType {
 	}
 
 	return data
+}
+
+func (g *Game) SaveWorld(fileName string) error {
+	f, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for y := 0; y < g.NumberOfTilesHeight; y++ {
+		for x := 0; x < g.NumberOfTilesWidth; x++ {
+			f.WriteString(strconv.Itoa(int(g.world[x][y])))
+		}
+		f.WriteString("\n")
+	}
+
+	return nil
+}
+
+func (g *Game) LoadWorld(fileName string) error {
+	f, err := os.OpenFile(fileName, os.O_RDONLY, 0755)
+
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	// optionally, resize scanner's capacity for lines over 64K, see next example
+	y := 0
+	for scanner.Scan() {
+		l := scanner.Text()
+		for x, c := range l {
+			if string(c) == "0" {
+				g.world[x][y] = 0
+			}
+
+			if string(c) == "1" {
+				g.world[x][y] = 1
+			}
+		}
+		y++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	return nil
 }

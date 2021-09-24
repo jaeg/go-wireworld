@@ -13,6 +13,8 @@
 * `Left Mouse` - Change cell state
 * `Right Mouse` - Make cell inactive
 * `Num keys 1 through 4` - change the speed
+* `E` - Exports to `save.csv`
+* `L` - Loads `save.csv`
 
 ### Running and Building
 Run `make vendor` first
