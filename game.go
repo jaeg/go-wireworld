@@ -193,6 +193,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 }
 
+func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
+	g.SimulationWidth = outsideWidth - GUIWidth
+	g.SimulationHeight = outsideHeight
+	return outsideWidth, outsideHeight
+}
+
 func (g *Game) SetRunning(status bool) {
 	g.Running = status
 	if status {
@@ -203,12 +209,6 @@ func (g *Game) SetRunning(status bool) {
 	} else {
 		g.title = Title + "Editing"
 	}
-}
-
-func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	g.SimulationWidth = outsideWidth - GUIWidth
-	g.SimulationHeight = outsideHeight
-	return outsideWidth, outsideHeight
 }
 
 func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
@@ -239,7 +239,7 @@ func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
 
 				//Highlight cell - note that it's using cellX and cellY not the screen coords
 				cX, cY := getTileUnderMouse()
-				if cX == cellX && cY == cellY {
+				if cX == int(x) && cY == int(y) {
 					c.R += 100
 				}
 			}
@@ -300,25 +300,6 @@ func (g *Game) UpdateSimulation() {
 	}
 }
 
-func getTileUnderMouse() (int, int) {
-	cX, cY := ebiten.CursorPosition()
-	temp := int(TileSize)
-	return cX / temp, cY / temp
-}
-
-func CreateWorldArray(width int, height int) [][]CellType {
-	data := make([][]CellType, width)
-	for x := 0; x < width; x++ {
-		col := []CellType{}
-		for y := 0; y < height; y++ {
-			col = append(col, Dead)
-		}
-		data[x] = append(data[x], col...)
-	}
-
-	return data
-}
-
 func (g *Game) SaveWorld(fileName string) error {
 	f, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 
@@ -366,4 +347,23 @@ func (g *Game) LoadWorld(fileName string) error {
 	}
 
 	return nil
+}
+
+func getTileUnderMouse() (int, int) {
+	cX, cY := ebiten.CursorPosition()
+	temp := int(TileSize)
+	return cX / temp, cY / temp
+}
+
+func CreateWorldArray(width int, height int) [][]CellType {
+	data := make([][]CellType, width)
+	for x := 0; x < width; x++ {
+		col := []CellType{}
+		for y := 0; y < height; y++ {
+			col = append(col, Dead)
+		}
+		data[x] = append(data[x], col...)
+	}
+
+	return data
 }
