@@ -27,6 +27,11 @@ var HeadColor = color.RGBA{R: 100, G: 0, B: 0, A: 255}
 var TailColor = color.RGBA{R: 0, G: 100, B: 0, A: 255}
 var DeadColor = color.RGBA{R: 100, G: 100, B: 100, A: 255}
 
+var CursorColor = color.RGBA{R: 100, G: 0, B: 0, A: 100}
+var CursorSelectColor = color.RGBA{R: 0, G: 100, B: 0, A: 100}
+var CursorSelectedColor = color.RGBA{R: 0, G: 255, B: 0, A: 10}
+var CursorPasteColor = color.RGBA{R: 100, G: 0, B: 0, A: 10}
+
 type CellType int
 
 const (
@@ -34,6 +39,14 @@ const (
 	Wire
 	Head
 	Tail
+)
+
+type CursorMode int
+
+const (
+	CursorChange CursorMode = iota
+	CursorSelect
+	CursorPaste
 )
 
 type Game struct {
@@ -51,10 +64,16 @@ type Game struct {
 	ScrollY             int
 	SimulationWidth     int
 	SimulationHeight    int
+	CursorMode          CursorMode
+	SelectStartX        int
+	SelectStartY        int
+	SelectEndX          int
+	SelectEndY          int
+	CopyBuffer          [][]CellType
 }
 
 func NewGame(width int, height int) (*Game, error) {
-	g := &Game{title: Title + "Editing", NumberOfTilesWidth: width, NumberOfTilesHeight: height, SecondDelay: time.Second / 2, LastUpdated: time.Now()}
+	g := &Game{title: Title + "Editing", NumberOfTilesWidth: width, NumberOfTilesHeight: height, SecondDelay: time.Second / 2, LastUpdated: time.Now(), CursorMode: CursorChange}
 
 	g.world = CreateWorldArray(width, height)
 	ebiten.SetWindowResizable(true)
@@ -73,38 +92,107 @@ func (g *Game) Update() error {
 	screenCellX := cX + g.ScrollX
 	screenCellY := cY + g.ScrollY
 	if screenCellX < g.NumberOfTilesWidth && screenCellY < g.NumberOfTilesHeight {
-		if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-			if g.Running {
-				g.SetRunning(false)
+		if g.CursorMode == CursorChange {
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+				if g.Running {
+					g.SetRunning(false)
+				}
+
+				switch g.world[screenCellX][screenCellY] {
+				case Dead:
+					g.world[screenCellX][screenCellY] = Wire
+				case Wire:
+					g.world[screenCellX][screenCellY] = Head
+				case Head:
+					g.world[screenCellX][screenCellY] = Tail
+				case Tail:
+					g.world[screenCellX][screenCellY] = Wire
+				}
+			} else if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) { //Allow for drag adding of wires.
+				if g.Running {
+					g.SetRunning(false)
+				}
+
+				if g.world[screenCellX][screenCellY] == Dead {
+					g.world[screenCellX][screenCellY] = Wire
+				}
 			}
 
-			switch g.world[screenCellX][screenCellY] {
-			case Dead:
-				g.world[screenCellX][screenCellY] = Wire
-			case Wire:
-				g.world[screenCellX][screenCellY] = Head
-			case Head:
-				g.world[screenCellX][screenCellY] = Tail
-			case Tail:
-				g.world[screenCellX][screenCellY] = Wire
+			//Kill cell
+			if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
+				if g.Running {
+					g.SetRunning(false)
+				}
+
+				g.world[screenCellX][screenCellY] = Dead
 			}
-		} else if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) { //Allow for drag adding of wires.
-			if g.Running {
-				g.SetRunning(false)
+		} else if g.CursorMode == CursorSelect {
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+				if g.SelectStartX == -1 || g.SelectEndX != -1 {
+					g.SelectStartX = screenCellX
+					g.SelectStartY = screenCellY
+					g.SelectEndX = -1
+					g.SelectEndY = -1
+				} else {
+					g.SelectEndX = screenCellX
+					g.SelectEndY = screenCellY
+					//g.CursorMode = CursorPaste
+				}
 			}
 
-			if g.world[screenCellX][screenCellY] == Dead {
-				g.world[screenCellX][screenCellY] = Wire
-			}
-		}
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
+				g.SelectStartX = -1
+				g.SelectStartY = -1
 
-		//Kill cell
-		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
-			if g.Running {
-				g.SetRunning(false)
+				g.SelectEndX = -1
+				g.SelectEndY = -1
 			}
 
-			g.world[screenCellX][screenCellY] = Dead
+			//Copy selection
+			if inpututil.IsKeyJustPressed(ebiten.KeyC) {
+				g.CopyToBuffer(g.SelectStartX, g.SelectStartY, g.SelectEndX, g.SelectEndY)
+
+				g.CursorMode = CursorPaste
+			}
+
+			//delete logic
+			if inpututil.IsKeyJustPressed(ebiten.KeyX) {
+				for x := g.SelectStartX; x <= g.SelectEndX; x++ {
+					for y := g.SelectStartY; y <= g.SelectEndY; y++ {
+						g.world[x][y] = Dead
+					}
+				}
+				//Reset selection
+				g.SelectStartX = -1
+				g.SelectStartY = -1
+
+				g.SelectEndX = -1
+				g.SelectEndY = -1
+			}
+
+		} else if g.CursorMode == CursorPaste {
+			//Copy from paste location
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+				for x := 0; x < len(g.CopyBuffer); x++ {
+					for y := 0; y < len(g.CopyBuffer[0]); y++ {
+						dstX := x + screenCellX
+						dstY := y + screenCellY
+						if dstX > 0 && dstX < g.NumberOfTilesWidth && dstY > 0 && dstY < g.NumberOfTilesHeight {
+							g.world[dstX][dstY] = g.CopyBuffer[x][y]
+						}
+					}
+				}
+			}
+
+			//Cancel the paste
+			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
+				g.SelectStartX = -1
+				g.SelectStartY = -1
+
+				g.SelectEndX = -1
+				g.SelectEndY = -1
+				g.CursorMode = CursorChange
+			}
 		}
 	}
 
@@ -168,12 +256,25 @@ func (g *Game) Update() error {
 		}
 	}
 
+	// Editing tools
 	if ebiten.IsKeyPressed(ebiten.KeyE) {
 		g.SaveWorld("save.csv")
 	}
 
 	if ebiten.IsKeyPressed(ebiten.KeyL) {
 		g.LoadWorld("save.csv")
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyQ) {
+		if g.CursorMode == CursorChange {
+			g.CursorMode = CursorSelect
+			g.SelectEndX = -1
+			g.SelectEndY = -1
+			g.SelectStartX = -1
+			g.SelectEndY = -1
+		} else {
+			g.CursorMode = CursorChange
+		}
 	}
 
 	g.UpdateSimulation()
@@ -237,14 +338,43 @@ func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
 					c = DeadColor
 				}
 
-				//Highlight cell - note that it's using cellX and cellY not the screen coords
-				cX, cY := getTileUnderMouse()
-				if cX == int(x) && cY == int(y) {
-					c.R += 100
-				}
 			}
 
 			ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, c)
+
+			//Highlight cell - note that it's using cellX and cellY not the screen coords
+			cX, cY := getTileUnderMouse()
+			if cX == int(x) && cY == int(y) {
+				c := CursorColor
+				if g.CursorMode == CursorSelect {
+					c = CursorSelectColor
+				} else if g.CursorMode == CursorPaste {
+					c = CursorPasteColor
+				}
+				ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, c)
+			}
+
+			//Render selection
+			if g.CursorMode == CursorSelect || g.CursorMode == CursorPaste {
+				//Highlight cell if its selected
+				if cellX >= g.SelectStartX && cellX <= g.SelectEndX && cellY >= g.SelectStartY && cellY <= g.SelectEndY {
+					ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, CursorSelectedColor)
+				}
+
+				if g.SelectStartX != -1 && g.SelectEndY == -1 {
+					if cellX >= g.SelectStartX+g.ScrollX && cellX <= cX+g.ScrollX && cellY >= g.SelectStartY && cellY <= cY+g.ScrollY {
+						ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, CursorSelectedColor)
+					}
+				}
+			}
+
+			//Paste
+			if g.CursorMode == CursorPaste {
+				//Highlight cell if its selected
+				if cellX >= cX+g.ScrollX && cellX <= g.SelectEndX-g.SelectStartX+cX+g.ScrollX && cellY >= cY+g.ScrollY && cellY <= g.SelectEndY-g.SelectStartY+cY+g.ScrollY {
+					ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, CursorPasteColor)
+				}
+			}
 		}
 	}
 }
@@ -347,6 +477,16 @@ func (g *Game) LoadWorld(fileName string) error {
 	}
 
 	return nil
+}
+
+func (g *Game) CopyToBuffer(sX, sY, eX, eY int) {
+	g.CopyBuffer = CreateWorldArray(eX-sX+1, eY-sY+1)
+
+	for x := sX; x <= eX; x++ {
+		for y := sY; y <= eY; y++ {
+			g.CopyBuffer[x-sX][y-sY] = g.world[x][y]
+		}
+	}
 }
 
 func getTileUnderMouse() (int, int) {
