@@ -173,15 +173,7 @@ func (g *Game) Update() error {
 		} else if g.CursorMode == CursorPaste {
 			//Copy from paste location
 			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-				for x := 0; x < len(g.CopyBuffer); x++ {
-					for y := 0; y < len(g.CopyBuffer[0]); y++ {
-						dstX := x + screenCellX
-						dstY := y + screenCellY
-						if dstX > 0 && dstX < g.NumberOfTilesWidth && dstY > 0 && dstY < g.NumberOfTilesHeight {
-							g.world[dstX][dstY] = g.CopyBuffer[x][y]
-						}
-					}
-				}
+				g.PasteFromBuffer(screenCellX, screenCellY)
 			}
 
 			//Cancel the paste
@@ -485,6 +477,18 @@ func (g *Game) CopyToBuffer(sX, sY, eX, eY int) {
 	for x := sX; x <= eX; x++ {
 		for y := sY; y <= eY; y++ {
 			g.CopyBuffer[x-sX][y-sY] = g.world[x][y]
+		}
+	}
+}
+
+func (g *Game) PasteFromBuffer(startX, startY int) {
+	for x := 0; x < len(g.CopyBuffer); x++ {
+		for y := 0; y < len(g.CopyBuffer[0]); y++ {
+			dstX := x + startX
+			dstY := y + startY
+			if dstX > 0 && dstX < g.NumberOfTilesWidth && dstY > 0 && dstY < g.NumberOfTilesHeight {
+				g.world[dstX][dstY] = g.CopyBuffer[x][y]
+			}
 		}
 	}
 }
