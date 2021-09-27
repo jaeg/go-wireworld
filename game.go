@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"image/color"
-	"os"
 	"strconv"
 	"time"
 
@@ -11,6 +9,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
+	"github.com/jaeg/go-wireworld/ww"
 )
 
 const Title = "Wireworld - "
@@ -33,15 +32,6 @@ var CursorSelectColor = color.RGBA{R: 0, G: 100, B: 0, A: 100}
 var CursorSelectedColor = color.RGBA{R: 0, G: 255, B: 0, A: 10}
 var CursorPasteColor = color.RGBA{R: 100, G: 0, B: 0, A: 10}
 
-type CellType int
-
-const (
-	Dead CellType = iota
-	Wire
-	Head
-	Tail
-)
-
 type CursorMode int
 
 const (
@@ -51,32 +41,25 @@ const (
 )
 
 type Game struct {
-	title               string
-	world               [][]CellType
-	runningWorld        [][]CellType
-	NumberOfTilesWidth  int
-	NumberOfTilesHeight int
-	Running             bool
-	Tick                int
-	SecondDelay         time.Duration
-	StepMode            bool
-	LastUpdated         time.Time
-	ScrollX             int
-	ScrollY             int
-	SimulationWidth     int
-	SimulationHeight    int
-	CursorMode          CursorMode
-	SelectStartX        int
-	SelectStartY        int
-	SelectEndX          int
-	SelectEndY          int
-	CopyBuffer          [][]CellType
+	title            string
+	ww               *ww.WireWorld
+	SecondDelay      time.Duration
+	StepMode         bool
+	LastUpdated      time.Time
+	ScrollX          int
+	ScrollY          int
+	SimulationWidth  int
+	SimulationHeight int
+	CursorMode       CursorMode
+	SelectStartX     int
+	SelectStartY     int
+	SelectEndX       int
+	SelectEndY       int
 }
 
 func NewGame(width int, height int) (*Game, error) {
-	g := &Game{title: Title + "Editing", NumberOfTilesWidth: width, NumberOfTilesHeight: height, SecondDelay: time.Second / 2, LastUpdated: time.Now(), CursorMode: CursorChange}
+	g := &Game{title: Title + "Editing", ww: ww.CreateNewWireWorld(width, height), SecondDelay: time.Second / 2, LastUpdated: time.Now(), CursorMode: CursorChange}
 
-	g.world = CreateWorldArray(width, height)
 	ebiten.SetWindowResizable(true)
 	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
 	return g, nil
@@ -92,40 +75,39 @@ func (g *Game) Update() error {
 	cX, cY := getTileUnderMouse()
 	screenCellX := cX + g.ScrollX
 	screenCellY := cY + g.ScrollY
-	if screenCellX < g.NumberOfTilesWidth && screenCellY < g.NumberOfTilesHeight {
+	if screenCellX < g.ww.NumberOfTilesWidth && screenCellY < g.ww.NumberOfTilesHeight {
 		if g.CursorMode == CursorChange {
 			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-				if g.Running {
+				if g.ww.Running {
 					g.SetRunning(false)
 				}
 
-				switch g.world[screenCellX][screenCellY] {
-				case Dead:
-					g.world[screenCellX][screenCellY] = Wire
-				case Wire:
-					g.world[screenCellX][screenCellY] = Head
-				case Head:
-					g.world[screenCellX][screenCellY] = Tail
-				case Tail:
-					g.world[screenCellX][screenCellY] = Wire
+				switch g.ww.GetEditorTileAt(screenCellX, screenCellY) {
+				case ww.Dead:
+					g.ww.SetEditorTile(screenCellX, screenCellY, ww.Dead)
+				case ww.Wire:
+					g.ww.SetEditorTile(screenCellX, screenCellY, ww.Head)
+				case ww.Head:
+					g.ww.SetEditorTile(screenCellX, screenCellY, ww.Tail)
+				case ww.Tail:
+					g.ww.SetEditorTile(screenCellX, screenCellY, ww.Wire)
 				}
 			} else if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) { //Allow for drag adding of wires.
-				if g.Running {
+				if g.ww.Running {
 					g.SetRunning(false)
 				}
 
-				if g.world[screenCellX][screenCellY] == Dead {
-					g.world[screenCellX][screenCellY] = Wire
+				if g.ww.GetEditorTileAt(screenCellX, screenCellY) == ww.Dead {
+					g.ww.SetEditorTile(screenCellX, screenCellY, ww.Wire)
 				}
 			}
 
 			//Kill cell
 			if ebiten.IsMouseButtonPressed(ebiten.MouseButtonRight) {
-				if g.Running {
+				if g.ww.Running {
 					g.SetRunning(false)
 				}
-
-				g.world[screenCellX][screenCellY] = Dead
+				g.ww.SetEditorTile(screenCellX, screenCellY, ww.Dead)
 			}
 		} else if g.CursorMode == CursorSelect {
 			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
@@ -157,7 +139,7 @@ func (g *Game) Update() error {
 
 	//Pause/Run simulation
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		g.SetRunning(!g.Running)
+		g.SetRunning(!g.ww.Running)
 	}
 
 	//Speed settings
@@ -202,8 +184,7 @@ func (g *Game) Update() error {
 				panic(err)
 			}
 			if success {
-
-				g.SaveWorld(filename)
+				g.ww.SaveWorld(filename)
 			}
 		}
 
@@ -213,20 +194,21 @@ func (g *Game) Update() error {
 				panic(err)
 			}
 			if success {
-				g.LoadWorld(filename)
+				g.ww.LoadWorld(filename)
 			}
 		}
 
 		//Copy selection
 		if inpututil.IsKeyJustPressed(ebiten.KeyC) {
 			if g.SelectStartX != -1 && g.SelectStartY != -1 && g.SelectEndX != -1 && g.SelectEndY != -1 {
-				g.CopyToBuffer(g.SelectStartX, g.SelectStartY, g.SelectEndX, g.SelectEndY)
+				g.ww.CopyToBuffer(g.SelectStartX, g.SelectStartY, g.SelectEndX, g.SelectEndY)
 			}
 		}
 
 		if inpututil.IsKeyJustPressed(ebiten.KeyV) {
-			if len(g.CopyBuffer) > 0 {
-				g.PasteFromBuffer(screenCellX, screenCellY)
+			bufferWidth, _ := g.ww.GetCopyBufferDimensions()
+			if bufferWidth > 0 {
+				g.ww.PasteFromBuffer(screenCellX, screenCellY)
 			}
 		}
 	} else {
@@ -238,7 +220,7 @@ func (g *Game) Update() error {
 		}
 
 		if ebiten.IsKeyPressed(ebiten.KeyS) {
-			if g.ScrollY < g.NumberOfTilesHeight {
+			if g.ScrollY < g.ww.NumberOfTilesHeight {
 				g.ScrollY++
 			}
 		}
@@ -250,7 +232,7 @@ func (g *Game) Update() error {
 		}
 
 		if ebiten.IsKeyPressed(ebiten.KeyD) {
-			if g.ScrollX < g.NumberOfTilesWidth {
+			if g.ScrollX < g.ww.NumberOfTilesWidth {
 				g.ScrollX++
 			}
 		}
@@ -261,7 +243,7 @@ func (g *Game) Update() error {
 		if g.SelectStartX != -1 && g.SelectStartY != -1 && g.SelectEndX != -1 && g.SelectEndY != -1 {
 			for x := g.SelectStartX; x <= g.SelectEndX; x++ {
 				for y := g.SelectStartY; y <= g.SelectEndY; y++ {
-					g.world[x][y] = Dead
+					g.ww.SetEditorTile(screenCellX, screenCellY, ww.Dead)
 				}
 			}
 			//Reset selection
@@ -273,12 +255,6 @@ func (g *Game) Update() error {
 		}
 	}
 
-	//TODO - Change it so that when you shift-click it selects instead of switching modes like this.
-	/*
-		Ideally lets make this work so that it Shift-Click lets you select, the selection stays until you
-		right click or start a new selection.  Clicking "delete" while there's a selection gets rid of the contents
-		of the selection.  Ctrl-C will put it in the buffer.
-	*/
 	if ebiten.IsKeyPressed(ebiten.KeyShift) {
 		if g.CursorMode != CursorSelect {
 			//Reset selection if there was one partionally started
@@ -294,20 +270,22 @@ func (g *Game) Update() error {
 		g.CursorMode = CursorChange
 	}
 
-	g.UpdateSimulation()
+	if time.Now().After(g.LastUpdated.Add(g.SecondDelay)) && g.ww.Running {
+		g.ww.UpdateSimulation()
+		g.LastUpdated = time.Now()
+	}
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	if !g.Running {
+	if !g.ww.Running {
 		cX, cY := getTileUnderMouse()
 
 		ebiten.SetWindowTitle(g.title + " FPS: " + strconv.Itoa(int(ebiten.CurrentFPS())) + " X: " + strconv.Itoa(g.ScrollX+cX) + " Y: " + strconv.Itoa(g.ScrollY+cY))
-		g.DrawWorldArray(g.world, screen)
 	} else {
-		ebiten.SetWindowTitle(g.title + " FPS: " + strconv.Itoa(int(ebiten.CurrentFPS())) + " : " + strconv.Itoa(g.Tick))
-		g.DrawWorldArray(g.runningWorld, screen)
+		ebiten.SetWindowTitle(g.title + " FPS: " + strconv.Itoa(int(ebiten.CurrentFPS())) + " : " + strconv.Itoa(g.ww.Tick))
 	}
+	g.DrawWorldArray(screen)
 
 }
 
@@ -318,18 +296,15 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 }
 
 func (g *Game) SetRunning(status bool) {
-	g.Running = status
+	g.ww.SetRunning(status)
 	if status {
-		temp := g.world
-		g.runningWorld = temp
-		g.Tick = 0
 		g.title = Title + "Running"
 	} else {
 		g.title = Title + "Editing"
 	}
 }
 
-func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
+func (g *Game) DrawWorldArray(screen *ebiten.Image) {
 	width := float64(g.SimulationWidth) / TileSize
 	height := float64(g.SimulationHeight) / TileSize
 
@@ -343,15 +318,21 @@ func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
 
 			c := color.RGBA{R: 0, G: 0, B: 0, A: 255}
 
-			if cellX >= 0 && cellX < g.NumberOfTilesWidth && cellY >= 0 && cellY < g.NumberOfTilesHeight {
-				switch world[cellX][cellY] {
-				case Wire:
+			if cellX >= 0 && cellX < g.ww.NumberOfTilesWidth && cellY >= 0 && cellY < g.ww.NumberOfTilesHeight {
+				var cell ww.CellType
+				if g.ww.Running {
+					cell = g.ww.GetRunningTileAt(cellX, cellY)
+				} else {
+					cell = g.ww.GetEditorTileAt(cellX, cellY)
+				}
+				switch cell {
+				case ww.Wire:
 					c = WireColor
-				case Head:
+				case ww.Head:
 					c = HeadColor
-				case Tail:
+				case ww.Tail:
 					c = TailColor
-				case Dead:
+				case ww.Dead:
 					c = DeadColor
 				}
 
@@ -386,18 +367,16 @@ func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
 			}
 
 			//Render Paste
-			if ebiten.IsKeyPressed(ebiten.KeyControl) && len(g.CopyBuffer) > 0 {
-				bufferWidth := len(g.CopyBuffer)
-				bufferHeight := len(g.CopyBuffer[0])
-
+			bufferWidth, bufferHeight := g.ww.GetCopyBufferDimensions()
+			if ebiten.IsKeyPressed(ebiten.KeyControl) && bufferWidth > 0 {
 				if cellX >= cX+g.ScrollX && cellX < bufferWidth+cX+g.ScrollX && cellY >= cY+g.ScrollY && cellY < bufferHeight+cY+g.ScrollY {
 					c = CursorPasteColor
-					switch g.CopyBuffer[cellX-cX][cellY-cY] {
-					case Wire:
+					switch g.ww.GetCopyBufferAt(cellX-cX, cellY-cY) {
+					case ww.Wire:
 						c = WireColor
-					case Head:
+					case ww.Head:
 						c = HeadColor
-					case Tail:
+					case ww.Tail:
 						c = TailColor
 					}
 
@@ -412,143 +391,8 @@ func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
 	}
 }
 
-func (g *Game) UpdateSimulation() {
-	if g.Running && time.Now().After(g.LastUpdated.Add(g.SecondDelay)) {
-		//Process the rules
-		nextWorld := CreateWorldArray(g.NumberOfTilesWidth, g.NumberOfTilesHeight)
-		for cellX := 0; cellX < g.NumberOfTilesWidth; cellX++ {
-			for cellY := 0; cellY < g.NumberOfTilesHeight; cellY++ {
-				nextWorld[cellX][cellY] = g.runningWorld[cellX][cellY]
-				//The head turns all blocks around it into heads
-				if g.runningWorld[cellX][cellY] == Wire {
-					count := 0
-					for nX := cellX - 1; nX <= cellX+1; nX++ {
-						if nX < 0 || nX >= g.NumberOfTilesWidth {
-							continue
-						}
-						for nY := cellY - 1; nY <= cellY+1; nY++ {
-							if nY < 0 || nY >= g.NumberOfTilesHeight {
-								continue
-							}
-
-							//Convert to head
-							if g.runningWorld[nX][nY] == Head {
-								count++
-							}
-						}
-					}
-					if count <= 2 && count > 0 {
-						nextWorld[cellX][cellY] = Head
-					}
-				}
-
-				if g.runningWorld[cellX][cellY] == Dead {
-					continue
-				}
-				if g.runningWorld[cellX][cellY] == Head {
-					nextWorld[cellX][cellY] = Tail
-					continue
-				}
-				if g.runningWorld[cellX][cellY] == Tail {
-					nextWorld[cellX][cellY] = Wire
-					continue
-				}
-
-			}
-		}
-
-		g.runningWorld = nextWorld
-		g.Tick++
-		g.LastUpdated = time.Now()
-	}
-}
-
-func (g *Game) SaveWorld(fileName string) error {
-	f, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	for y := 0; y < g.NumberOfTilesHeight; y++ {
-		for x := 0; x < g.NumberOfTilesWidth; x++ {
-			f.WriteString(strconv.Itoa(int(g.world[x][y])))
-		}
-		f.WriteString("\n")
-	}
-
-	return nil
-}
-
-func (g *Game) LoadWorld(fileName string) error {
-	f, err := os.OpenFile(fileName, os.O_RDONLY, 0755)
-
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	// optionally, resize scanner's capacity for lines over 64K, see next example
-	y := 0
-	for scanner.Scan() {
-		l := scanner.Text()
-		for x, c := range l {
-			if string(c) == "0" {
-				g.world[x][y] = 0
-			}
-
-			if string(c) == "1" {
-				g.world[x][y] = 1
-			}
-		}
-		y++
-	}
-
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (g *Game) CopyToBuffer(sX, sY, eX, eY int) {
-	g.CopyBuffer = CreateWorldArray(eX-sX+1, eY-sY+1)
-
-	for x := sX; x <= eX; x++ {
-		for y := sY; y <= eY; y++ {
-			g.CopyBuffer[x-sX][y-sY] = g.world[x][y]
-		}
-	}
-}
-
-func (g *Game) PasteFromBuffer(startX, startY int) {
-	for x := 0; x < len(g.CopyBuffer); x++ {
-		for y := 0; y < len(g.CopyBuffer[0]); y++ {
-			dstX := x + startX
-			dstY := y + startY
-			if dstX > 0 && dstX < g.NumberOfTilesWidth && dstY > 0 && dstY < g.NumberOfTilesHeight {
-				g.world[dstX][dstY] = g.CopyBuffer[x][y]
-			}
-		}
-	}
-}
-
 func getTileUnderMouse() (int, int) {
 	cX, cY := ebiten.CursorPosition()
 	temp := int(TileSize)
 	return cX / temp, cY / temp
-}
-
-func CreateWorldArray(width int, height int) [][]CellType {
-	data := make([][]CellType, width)
-	for x := 0; x < width; x++ {
-		col := []CellType{}
-		for y := 0; y < height; y++ {
-			col = append(col, Dead)
-		}
-		data[x] = append(data[x], col...)
-	}
-
-	return data
 }
