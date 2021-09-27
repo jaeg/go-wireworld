@@ -133,10 +133,13 @@ func (g *Game) Update() error {
 					g.SelectStartY = screenCellY
 					g.SelectEndX = -1
 					g.SelectEndY = -1
-				} else {
+				}
+			}
+
+			if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+				if g.SelectStartX != -1 {
 					g.SelectEndX = screenCellX
 					g.SelectEndY = screenCellY
-					//g.CursorMode = CursorPaste
 				}
 			}
 
@@ -148,43 +151,6 @@ func (g *Game) Update() error {
 				g.SelectEndY = -1
 			}
 
-			//Copy selection
-			if inpututil.IsKeyJustPressed(ebiten.KeyC) {
-				g.CopyToBuffer(g.SelectStartX, g.SelectStartY, g.SelectEndX, g.SelectEndY)
-
-				g.CursorMode = CursorPaste
-			}
-
-			//delete logic
-			if inpututil.IsKeyJustPressed(ebiten.KeyX) {
-				for x := g.SelectStartX; x <= g.SelectEndX; x++ {
-					for y := g.SelectStartY; y <= g.SelectEndY; y++ {
-						g.world[x][y] = Dead
-					}
-				}
-				//Reset selection
-				g.SelectStartX = -1
-				g.SelectStartY = -1
-
-				g.SelectEndX = -1
-				g.SelectEndY = -1
-			}
-
-		} else if g.CursorMode == CursorPaste {
-			//Copy from paste location
-			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-				g.PasteFromBuffer(screenCellX, screenCellY)
-			}
-
-			//Cancel the paste
-			if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonRight) {
-				g.SelectStartX = -1
-				g.SelectStartY = -1
-
-				g.SelectEndX = -1
-				g.SelectEndY = -1
-				g.CursorMode = CursorChange
-			}
 		}
 	}
 
@@ -199,14 +165,18 @@ func (g *Game) Update() error {
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.Key2) {
-		g.SecondDelay = time.Second / 2
+		g.SecondDelay = time.Second / 4
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.Key3) {
-		g.SecondDelay = time.Second
+		g.SecondDelay = time.Second / 2
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.Key4) {
+		g.SecondDelay = time.Second
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.Key5) {
 		g.SecondDelay = time.Second * 2
 	}
 
@@ -223,50 +193,91 @@ func (g *Game) Update() error {
 		}
 	}
 
-	// Move view controls
-	if ebiten.IsKeyPressed(ebiten.KeyW) {
-		if g.ScrollY > 0 {
-			g.ScrollY--
+	if ebiten.IsKeyPressed(ebiten.KeyControl) {
+		// Loading tools
+		if ebiten.IsKeyPressed(ebiten.KeyS) {
+			g.SaveWorld("save.csv")
+		}
+
+		if ebiten.IsKeyPressed(ebiten.KeyO) {
+			g.LoadWorld("save.csv")
+		}
+
+		//Copy selection
+		if inpututil.IsKeyJustPressed(ebiten.KeyC) {
+			if g.SelectStartX != -1 && g.SelectStartY != -1 && g.SelectEndX != -1 && g.SelectEndY != -1 {
+				g.CopyToBuffer(g.SelectStartX, g.SelectStartY, g.SelectEndX, g.SelectEndY)
+			}
+		}
+
+		if inpututil.IsKeyJustPressed(ebiten.KeyV) {
+			if len(g.CopyBuffer) > 0 {
+				g.PasteFromBuffer(screenCellX, screenCellY)
+			}
+		}
+	} else {
+		// Move view controls
+		if ebiten.IsKeyPressed(ebiten.KeyW) {
+			if g.ScrollY > 0 {
+				g.ScrollY--
+			}
+		}
+
+		if ebiten.IsKeyPressed(ebiten.KeyS) {
+			if g.ScrollY < g.NumberOfTilesHeight {
+				g.ScrollY++
+			}
+		}
+
+		if ebiten.IsKeyPressed(ebiten.KeyA) {
+			if g.ScrollX > 0 {
+				g.ScrollX--
+			}
+		}
+
+		if ebiten.IsKeyPressed(ebiten.KeyD) {
+			if g.ScrollX < g.NumberOfTilesWidth {
+				g.ScrollX++
+			}
 		}
 	}
 
-	if ebiten.IsKeyPressed(ebiten.KeyS) {
-		if g.ScrollY < g.NumberOfTilesHeight {
-			g.ScrollY++
-		}
-	}
+	//delete logic
+	if inpututil.IsKeyJustPressed(ebiten.KeyDelete) {
+		if g.SelectStartX != -1 && g.SelectStartY != -1 && g.SelectEndX != -1 && g.SelectEndY != -1 {
+			for x := g.SelectStartX; x <= g.SelectEndX; x++ {
+				for y := g.SelectStartY; y <= g.SelectEndY; y++ {
+					g.world[x][y] = Dead
+				}
+			}
+			//Reset selection
+			g.SelectStartX = -1
+			g.SelectStartY = -1
 
-	if ebiten.IsKeyPressed(ebiten.KeyA) {
-		if g.ScrollX > 0 {
-			g.ScrollX--
-		}
-	}
-
-	if ebiten.IsKeyPressed(ebiten.KeyD) {
-		if g.ScrollX < g.NumberOfTilesWidth {
-			g.ScrollX++
-		}
-	}
-
-	// Editing tools
-	if ebiten.IsKeyPressed(ebiten.KeyE) {
-		g.SaveWorld("save.csv")
-	}
-
-	if ebiten.IsKeyPressed(ebiten.KeyL) {
-		g.LoadWorld("save.csv")
-	}
-
-	if inpututil.IsKeyJustPressed(ebiten.KeyQ) {
-		if g.CursorMode == CursorChange {
-			g.CursorMode = CursorSelect
 			g.SelectEndX = -1
 			g.SelectEndY = -1
-			g.SelectStartX = -1
-			g.SelectEndY = -1
-		} else {
-			g.CursorMode = CursorChange
 		}
+	}
+
+	//TODO - Change it so that when you shift-click it selects instead of switching modes like this.
+	/*
+		Ideally lets make this work so that it Shift-Click lets you select, the selection stays until you
+		right click or start a new selection.  Clicking "delete" while there's a selection gets rid of the contents
+		of the selection.  Ctrl-C will put it in the buffer.
+	*/
+	if ebiten.IsKeyPressed(ebiten.KeyShift) {
+		if g.CursorMode != CursorSelect {
+			//Reset selection if there was one partionally started
+			if g.SelectStartX != -1 && g.SelectEndX == -1 {
+				g.SelectStartX = -1
+				g.SelectStartY = -1
+				g.SelectEndX = -1
+				g.SelectEndY = -1
+			}
+			g.CursorMode = CursorSelect
+		}
+	} else {
+		g.CursorMode = CursorChange
 	}
 
 	g.UpdateSimulation()
@@ -347,26 +358,42 @@ func (g *Game) DrawWorldArray(world [][]CellType, screen *ebiten.Image) {
 			}
 
 			//Render selection
-			if g.CursorMode == CursorSelect || g.CursorMode == CursorPaste {
+			if g.CursorMode == CursorSelect || (g.SelectStartX != -1 && g.SelectStartY != -1 && g.SelectEndX != -1 && g.SelectEndY != -1) {
 				//Highlight cell if its selected
 				if cellX >= g.SelectStartX && cellX <= g.SelectEndX && cellY >= g.SelectStartY && cellY <= g.SelectEndY {
 					ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, CursorSelectedColor)
 				}
 
-				if g.SelectStartX != -1 && g.SelectEndY == -1 {
+				if g.SelectStartX != -1 && g.SelectEndX == -1 {
 					if cellX >= g.SelectStartX+g.ScrollX && cellX <= cX+g.ScrollX && cellY >= g.SelectStartY && cellY <= cY+g.ScrollY {
 						ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, CursorSelectedColor)
 					}
 				}
 			}
 
-			//Paste
-			if g.CursorMode == CursorPaste {
-				//Highlight cell if its selected
-				if cellX >= cX+g.ScrollX && cellX <= g.SelectEndX-g.SelectStartX+cX+g.ScrollX && cellY >= cY+g.ScrollY && cellY <= g.SelectEndY-g.SelectStartY+cY+g.ScrollY {
-					ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, CursorPasteColor)
+			//Render Paste
+			if ebiten.IsKeyPressed(ebiten.KeyControl) && len(g.CopyBuffer) > 0 {
+				bufferWidth := len(g.CopyBuffer)
+				bufferHeight := len(g.CopyBuffer[0])
+
+				if cellX >= cX+g.ScrollX && cellX < bufferWidth+cX+g.ScrollX && cellY >= cY+g.ScrollY && cellY < bufferHeight+cY+g.ScrollY {
+					c = CursorPasteColor
+					switch g.CopyBuffer[cellX-cX][cellY-cY] {
+					case Wire:
+						c = WireColor
+					case Head:
+						c = HeadColor
+					case Tail:
+						c = TailColor
+					}
+
+					c.A = 100
+
+					ebitenutil.DrawRect(screen, screenX, screenY, TileSize-1, TileSize-1, c)
+
 				}
 			}
+
 		}
 	}
 }

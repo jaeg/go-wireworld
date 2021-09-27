@@ -13,13 +13,13 @@
 * `Left Mouse` - Change cell state
 * `Right Mouse` - Make cell inactive
 * `Num keys 1 through 4` - change the speed
-* `E` - Exports to `save.csv`
-* `L` - Loads `save.csv`
-* `Q` - Change cursor mode Edit/Select
-* `D` - Delete selected
-* `C` - Copy selected to buffer 
-    * `Left Mouse` - Paste buffer
-    * `Right Mouse` - Cancel
+* `Shift` - Change cursor mode Edit/Select
+* `Shift-Right Mouse` - Cancel current selection
+* `Delete` - Delete selected   --Note: Mac users might need to use fn-Delete
+* `Ctrl-C` - Copy selected to buffer 
+* `Ctrl-V` - Paste buffer
+* `Ctrl-S` - Exports to `save.csv`
+* `Ctrl-O` - Loads `save.csv`
 
 ### Running and Building
 Run `make vendor` first
