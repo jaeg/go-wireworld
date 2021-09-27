@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gen2brain/dlgs"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -195,12 +196,25 @@ func (g *Game) Update() error {
 
 	if ebiten.IsKeyPressed(ebiten.KeyControl) {
 		// Loading tools
-		if ebiten.IsKeyPressed(ebiten.KeyS) {
-			g.SaveWorld("save.csv")
+		if inpututil.IsKeyJustPressed(ebiten.KeyS) {
+			filename, success, err := dlgs.Entry("Save world", "Enter name of file", "save.ww")
+			if err != nil {
+				panic(err)
+			}
+			if success {
+
+				g.SaveWorld(filename)
+			}
 		}
 
-		if ebiten.IsKeyPressed(ebiten.KeyO) {
-			g.LoadWorld("save.csv")
+		if inpututil.IsKeyJustPressed(ebiten.KeyO) {
+			filename, success, err := dlgs.File("Load world", "*.ww", false)
+			if err != nil {
+				panic(err)
+			}
+			if success {
+				g.LoadWorld(filename)
+			}
 		}
 
 		//Copy selection
